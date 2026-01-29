@@ -1,15 +1,15 @@
 /******************************************************************************
 
- @file main.c
+ @file  main.c
 
- @brief main entry of the example application
+ @brief Main entry of the 15.4 & BLE remote display sample application.
 
- Group: WCS LPC
+ Group: WCS, BTS
  Target Device: cc13xx_cc26xx
 
  ******************************************************************************
  
- Copyright (c) 2016-2025, Texas Instruments Incorporated
+ Copyright (c) 2013-2025, Texas Instruments Incorporated
  All rights reserved.
 
  Redistribution and use in source and binary forms, with or without
@@ -44,132 +44,167 @@
  
  *****************************************************************************/
 
-/******************************************************************************
- Includes
- *****************************************************************************/
+/*******************************************************************************
+ * INCLUDES
+ */
 
-/* RTOS header files */
-#ifndef FREERTOS_SUPPORT
-#include <ti/sysbios/BIOS.h>
-#else
-#include <FreeRTOS.h>
-#include <task.h>
-#endif
+#include <xdc/runtime/Error.h>
 
-#include <pthread.h>
-
-#include <ioc.h>
-
-#include "sys_ctrl.h"
-
-#include "ti_drivers_config.h"
-
-#include <inc/hw_ccfg.h>
-#include <inc/hw_ccfg_simple_struct.h>
-
-/* Header files required for the temporary idle task function */
+#include <ti/sysbios/knl/Clock.h>
 #include <ti/drivers/Power.h>
 #include <ti/drivers/power/PowerCC26XX.h>
+#include <ti/sysbios/BIOS.h>
+#include <ti/drivers/apps/Button.h>
+#include <ti/drivers/apps/LED.h>
+#include <ti/sysbios/hal/Hwi.h>
 #include <ti/drivers/GPIO.h>
-#include <aon_rtc.h>
-#include <prcm.h>
+#include "application/uart_debug.h" 
 
-#if (defined(FEATURE_BLE_OAD) || defined(FEATURE_NATIVE_OAD)) && !defined(OAD_ONCHIP)
-#include <ti/drivers/SPI.h>
-#endif
 
-#if defined(FEATURE_BLE_OAD)
-    #include "ble_oad/oad_switch.h"
-#endif
+#include <icall.h>
+#include "bcomdef.h"
 
+#ifdef DMM_CENTRAL
+#include "central_display.h"
+#else
+#include "remote_display.h"
+#endif /* DMM_CENTRAL */
+
+#include "macTask.h"
+#include "sensor.h"
 /* Header files required to enable instruction fetch cache */
-#include <vims.h>
-#include <hw_memmap.h>
+#include <inc/hw_memmap.h>
+#include <driverlib/vims.h>
 
-#include <ti/drivers/dpl/HwiP.h>
-
-#include "cpu.h"
+/* Header files related to CCFG */
+#include <inc/hw_ccfg.h>
+#ifndef DMM_OAD
+#include <inc/hw_ccfg_simple_struct.h> // also include for non-OAD projects
+#endif
 
 #ifdef NV_RESTORE
 #include "macconfig.h"
 #include "nvocmp.h"
 #endif
 
-#include <string.h>
-#include <assert.h>
-#ifdef OSAL_PORT2TIRTOS
-#include "macTask.h"
-#else
-#include "api_mac.h"
-#include "icall.h"
-#endif
-
-#include "ssf.h"
-
-#include "sensor.h"
 
 #ifndef USE_DEFAULT_USER_CFG
+#include "ble_user_config.h"
+// BLE user defined configuration
+icall_userCfg_t user0Cfg = BLE_USER_CFG;
+#endif // USE_DEFAULT_USER_CFG
+
+#ifdef DMM_OAD
+#include <profiles/oad/cc26xx/mark_switch_factory_img.h>
+#endif
 
 #include "mac_user_config.h"
 
+/* Include DMM module */
+#include <dmm/dmm_scheduler.h>
+#include "ti_dmm_application_policy.h"
+#include <dmm/dmm_priority_ble_154sensor.h>
+
+/* Internal POSIX Mapping for thread handle */
+#include <tirtos/_pthread.h>
+
+#include "application/sk6812_spi.h"
+#include <ti/drivers/rf/RF.h>
+#include <ti/drivers/UART2.h>
+
+#if defined(RESET_ASSERT)
+#include <driverlib/sys_ctrl.h>
+#include "ssf.h"
+#endif
+
 #ifndef CUI_DISABLE
 #include "cui.h"
-#endif
+#endif /* CUI_DISABLE */
 
 #ifdef USE_ITM_DBG
 #include "itm.h"
+#include "ioc.h"
 #endif
 
-/* MAC user defined configuration */
-macUserCfg_t macUser0Cfg[] = MAC_USER_CFG;
+// extern volatile uint32_t g_antCbEvents;
+// extern volatile uint32_t g_antCbCount;
 
-#endif /* USE_DEFAULT_USER_CFG */
+static uint8_t ant_shown = 0;
 
-/******************************************************************************
- Constants
- *****************************************************************************/
+static void AntCb_ShowOnce(void)
+{
+    // if (ant_shown) return;
+    // if (g_antCbCount == 0) return;   // 콜백이 아직 한번도 안옴
 
-/* Assert Reasons */
-#define MAIN_ASSERT_MAC          3
-#define MAIN_ASSERT_HWI_TIRTOS   4
+    // ant_shown = 1;
 
-#define MAX_ASSERT_TOGGLE_COUNT  500000
+    // if (g_antCbEvents & (uint32_t)RF_GlobalEventRadioSetup)
+    // {
+    //     // 초록: RadioSetup까지 들어옴
+    //     sk6812_flash_once(0, 40, 0, 150);
+    // }
+    // else if (g_antCbEvents & (uint32_t)RF_GlobalEventInit)
+    // {
+    //     // 파랑: Init만 들어옴
+    //     sk6812_flash_once(0, 0, 40, 150);
+    // }
+    // else
+    // {
+    //     // 빨강: 기타 이벤트만
+    //     sk6812_flash_once(40, 0, 0, 150);
+    // }
+}
 
-#define RFC_MODE_BLE                 PRCM_RFCMODESEL_CURR_MODE1
-#define RFC_MODE_IEEE                PRCM_RFCMODESEL_CURR_MODE2
-#define RFC_MODE_ANT                 PRCM_RFCMODESEL_CURR_MODE4
-#define RFC_MODE_EVERYTHING_BUT_ANT  PRCM_RFCMODESEL_CURR_MODE5
-#define RFC_MODE_EVERYTHING          PRCM_RFCMODESEL_CURR_MODE6
-
+/*******************************************************************************
+ * MACROS
+ */
+#if defined(FEATURE_NATIVE_OAD)
+#error "Secure commissioning and Native OAD are not currently supported for DMM."
+#endif
+/*******************************************************************************
+ * CONSTANTS
+ */
 /* Extended Address offset in FCFG (LSB..MSB) */
 #define EXTADDR_OFFSET 0x2F0
 
-#define APP_TASK_PRIORITY   1
-#if defined(DeviceFamily_CC13X2) || defined(DeviceFamily_CC26X2) || \
-    defined(DeviceFamily_CC13X2X7) || defined(DeviceFamily_CC26X2X7) || \
-    defined(DeviceFamily_CC13X1) || defined(DeviceFamily_CC26X1) || \
-    defined(DeviceFamily_CC13X4) || defined(DeviceFamily_CC26X4) || defined(DeviceFamily_CC26X3)
-#define APP_TASK_STACK_SIZE 2048
+#define MAC_APP_TASK_PRIORITY   1
+#if defined(CC13X2R1_LAUNCHXL)  ||      \
+    defined(CC26X2R1_LAUNCHXL)  ||      \
+    defined(CC13X2P1_LAUNCHXL)  ||      \
+    defined(CC13X2P_2_LAUNCHXL) ||      \
+    defined(CC13X2P_4_LAUNCHXL) ||      \
+    defined(CC2652RB_LAUNCHXL)  ||      \
+    defined(EM_CC1354P10_1_LP)  ||      \
+    defined(EM_CC1354P10_6_LP)  ||      \
+    defined(DeviceFamily_CC26X4)
+#define MAC_APP_TASK_STACK_SIZE 2048
 #else
-#define APP_TASK_STACK_SIZE 900
+#define MAC_APP_TASK_STACK_SIZE 900
 #endif
 
-#define SET_RFC_MODE(mode) HWREG( PRCM_BASE + PRCM_O_RFCMODESEL ) = (mode)
+#define MAIN_ASSERT_HWI_TIRTOS   4
 
-/******************************************************************************
- External Variables
- *****************************************************************************/
+/*******************************************************************************
+ * TYPEDEFS
+ */
 
-extern ApiMac_sAddrExt_t ApiMac_extAddr;
+/*******************************************************************************
+ * LOCAL VARIABLES
+ */
+/* Used to check for a valid extended address */
+static const uint8_t dummyExtAddr[] =
+    { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
 
-/******************************************************************************
- Global Variables
- *****************************************************************************/
-pthread_t appThread;       /* not static so you can see in ROV */
+/*******************************************************************************
+ * GLOBAL VARIABLES
+ */
+/* MAC user defined configuration */
+macUserCfg_t macUser0Cfg[] = MAC_USER_CFG;
 
-#ifdef OSAL_PORT2TIRTOS
+Task_Struct macAppTask;        /* not static so you can see in ROV */
+static uint8_t macAppTaskStack[MAC_APP_TASK_STACK_SIZE];
+
 static uint8_t _macTaskId;
-#endif
 
 /*
  When assert happens, this field will be filled with the reason:
@@ -181,37 +216,257 @@ uint8 Main_assertReason = 0;
 mac_Config_t Main_user1Cfg = { 0 };
 #endif
 
-/******************************************************************************
- Local Variables
- *****************************************************************************/
-/* Used to check for a valid extended address */
-static const uint8_t dummyExtAddr[] =
-    { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+/*******************************************************************************
+ * EXTERNS
+ */
+extern void AssertHandler(uint8 assertCause, uint8 assertSubcause);
 
-extern void Board_init(void);
-
-#ifdef FREERTOS_SUPPORT
-extern void startRfCbThread(void);
-#endif
+extern ApiMac_sAddrExt_t ApiMac_extAddr;
 
 /*!
- * @brief       Reads the IEEE extended MAC address from the CCFG
- * @param       addr - Extended address pointer
+ * @brief       Main task function
+ *
+ * @param       a0 -
+ * @param       a1 -
  */
-static inline void CCFGRead_IEEE_MAC(ApiMac_sAddrExt_t addr)
+Void macAppTaskFxn(UArg a0, UArg a1)
 {
-    uint32_t macAddr = (( HWREG(
-            CCFG_BASE + CCFG_O_IEEE_MAC_0 ) &
-            CCFG_IEEE_MAC_0_ADDR_M ) >>
-            CCFG_IEEE_MAC_0_ADDR_S );
-    memcpy(addr, (uint8_t *)&macAddr, (APIMAC_SADDR_EXT_LEN / 2));
+#ifdef TIMAC_AGAMA_FPGA
+    /* FPGA build disables POWER constraints */
+    Power_setConstraint(PowerCC26XX_IDLE_PD_DISALLOW);
+    Power_setConstraint(PowerCC26XX_SB_DISALLOW);
 
-    macAddr = (( HWREG(
-            CCFG_BASE + CCFG_O_IEEE_MAC_1 ) &
-            CCFG_IEEE_MAC_1_ADDR_M ) >>
-            CCFG_IEEE_MAC_1_ADDR_S );
-    memcpy(addr + (APIMAC_SADDR_EXT_LEN / 2), (uint8_t *)&macAddr,
-           (APIMAC_SADDR_EXT_LEN / 2));
+    IOCPortConfigureSet(IOID_20, IOC_PORT_RFC_GPO0, IOC_STD_OUTPUT);
+    IOCPortConfigureSet(IOID_18, IOC_PORT_RFC_GPI0, IOC_STD_INPUT);
+    // configure RF Core SMI Command Link
+    IOCPortConfigureSet(IOID_22, IOC_IOCFG0_PORT_ID_RFC_SMI_CL_OUT, IOC_STD_OUTPUT);
+    IOCPortConfigureSet(IOID_21, IOC_IOCFG0_PORT_ID_RFC_SMI_CL_IN, IOC_STD_INPUT);
+#endif
+
+    /*
+     * Copy the extended address from the CCFG area
+     * Assumption: the memory in CCFG_IEEE_MAC_0 and CCFG_IEEE_MAC_1
+     * is contiguous and LSB first.
+     */
+#ifndef DMM_OAD
+    memcpy(ApiMac_extAddr, (uint8_t *)&(__ccfg.CCFG_IEEE_MAC_0),
+           (APIMAC_SADDR_EXT_LEN));
+#else
+    memcpy(ApiMac_extAddr, (uint8_t *)(CCFG_BASE + CCFG_O_IEEE_MAC_0),
+           (APIMAC_SADDR_EXT_LEN));
+#endif
+
+    /* Check to see if the CCFG IEEE is valid */
+    if(memcmp(ApiMac_extAddr, dummyExtAddr, APIMAC_SADDR_EXT_LEN) == 0)
+    {
+        /* No, it isn't valid.  Get the Primary IEEE Address */
+        memcpy(ApiMac_extAddr, (uint8_t *)(FCFG1_BASE + EXTADDR_OFFSET),
+               (APIMAC_SADDR_EXT_LEN));
+    }
+
+#ifdef NV_RESTORE
+    /* Setup the NV driver */
+    NVOCMP_loadApiPtrs(&Main_user1Cfg.nvFps);
+
+#if !defined(BLE_START) && defined(MAC_START)
+    // The init is done by BLE. Leave it here for now in case we run 15.4 only.
+    if(Main_user1Cfg.nvFps.initNV)
+    {
+        Main_user1Cfg.nvFps.initNV(NULL);
+    }
+#endif
+
+#endif
+
+        // SK6812 초기화 (task context에서)
+    SK6812_init();
+
+    /* Initialize the application */
+    Sensor_init(_macTaskId);
+
+    /* Kick off application - Forever loop */
+    while(1)
+    {
+        // AntCb_ShowOnce();
+        Sensor_process();
+    }
+}
+
+/*!
+ * @brief       TIRTOS HWI Handler.  The name of this function is set to
+ *              M3Hwi.excHandlerFunc in app.cfg, you can disable this by
+ *              setting it to null.
+ *
+ * @param       excStack - TIROS variable
+ * @param       lr - TIROS variable
+ */
+xdc_Void Main_excHandler(UInt *excStack, UInt lr)
+{
+#if defined(RESET_ASSERT)
+    Ssf_assertInd(MAIN_ASSERT_HWI_TIRTOS);
+
+    /* Pull the plug and start over */
+    SysCtrlSystemReset();
+#else
+    //spin here
+    while(1);
+#endif
+}
+
+/*******************************************************************************
+ * @fn          Main
+ *
+ * @brief       Application Main
+ *
+ * input parameters
+ *
+ * @param       None.
+ *
+ * output parameters
+ *
+ * @param       None.
+ *
+ * @return      None.
+ */
+int main()
+{
+  Task_Handle* pBleTaskHndl;
+  Task_Handle* pMacTaskHndl;
+  DMMPolicy_Params dmmPolicyParams;
+  DMMSch_Params dmmSchedulerParams;
+  Task_Params macAppTaskParams;
+
+  /* Register Application callback to trap asserts raised in the Stack */
+  RegisterAssertCback(AssertHandler);
+
+  /* GPIO init must be called prior to Board_initGeneral for proper pin configuration */
+  GPIO_init();
+  Board_initGeneral();
+
+#ifdef DMM_OAD
+    /* If DMM_OAD is enabled, look for a left button
+     *  press on reset. This indicates to revert to some
+     *  factory image
+     */
+    if (!GPIO_read(CONFIG_GPIO_BTN1))
+    {
+        markSwitchFactoryImg();
+    }
+#endif /* DMM_OAD */
+
+  // Enable iCache prefetching
+  VIMSConfigure(VIMS_BASE, TRUE, TRUE);
+  // Enable cache
+  VIMSModeSet(VIMS_BASE, VIMS_MODE_ENABLED);
+
+#if !defined( POWER_SAVING )
+  /* Set constraints for Standby, powerdown and idle mode */
+  // PowerCC26XX_SB_DISALLOW may be redundant
+  Power_setConstraint(PowerCC26XX_SB_DISALLOW);
+  Power_setConstraint(PowerCC26XX_IDLE_PD_DISALLOW);
+#endif // POWER_SAVING
+
+  /* Update User Configuration of the stack */
+  user0Cfg.appServiceInfo->timerTickPeriod = Clock_tickPeriod;
+  user0Cfg.appServiceInfo->timerMaxMillisecond  = ICall_getMaxMSecs();
+
+  Button_init();
+
+#ifndef POWER_MEAS
+  LED_init();
+  /* Initialize UI for key and LED */
+#ifndef CUI_DISABLE
+  CUI_params_t cuiParams;
+  CUI_paramsInit(&cuiParams);
+#ifdef USE_ITM_DBG
+    cuiParams.manageUart = false;
+#endif
+
+  // One-time initialization of the CUI
+  // CUI_init(&cuiParams);
+#endif /* CUI_DISABLE */
+#endif
+
+
+#ifdef USE_ITM_DBG
+  // Configure SWO Traces on pin 26
+  IOCPortConfigureSet(26, IOC_PORT_MCU_SWV, IOC_STD_OUTPUT);
+  ITM_config itm_config =
+  {
+    48000000,
+    ITM_6000000
+  };
+  ITM_initModule(itm_config);
+  ITM_enableModule();
+#endif /* USE_ITM_DBG */
+
+#ifdef BLE_START
+  /* Initialize ICall module */
+  ICall_init();
+
+  /* Start tasks of external images */
+  ICall_createRemoteTasks();
+  pBleTaskHndl = ICall_getRemoteTaskHandle(0);
+
+#ifdef DMM_CENTRAL
+  CentralDisplay_createTask();
+#else
+  RemoteDisplay_createTask();
+#endif /* DMM_CENTRAL */
+#endif
+
+#ifdef MAC_START
+  /* Initialize 15.4 sensor tasks */
+  _macTaskId = macTaskInit(macUser0Cfg);
+  pMacTaskHndl = macTaskGetTaskHndl();
+
+  /* create 15.4 Sensor app task
+   */
+  Task_Params_init(&macAppTaskParams);
+  macAppTaskParams.stack = macAppTaskStack;
+  macAppTaskParams.stackSize = MAC_APP_TASK_STACK_SIZE;
+  macAppTaskParams.priority = MAC_APP_TASK_PRIORITY;
+  Task_construct(&macAppTask, macAppTaskFxn, &macAppTaskParams, NULL);
+#endif
+
+  /* initialize and open the DMM policy manager */
+  DMMPolicy_init();
+  DMMPolicy_Params_init(&dmmPolicyParams);
+  dmmPolicyParams.numPolicyTableEntries = DMMPolicy_ApplicationPolicySize;
+  dmmPolicyParams.policyTable = DMMPolicy_ApplicationPolicyTable;
+  dmmPolicyParams.globalPriorityTable = globalPriorityTable_bleL154SensorH;
+  DMMPolicy_open(&dmmPolicyParams);
+
+  /* initialize and open the DMM scheduler */
+  DMMSch_init();
+  DMMSch_Params_init(&dmmSchedulerParams);
+
+  //Copy stack roles and index table
+  memcpy(dmmSchedulerParams.stackRoles, DMMPolicy_ApplicationPolicyTable.stackRole, sizeof(DMMPolicy_StackRole) * DMMPOLICY_NUM_STACKS);
+  dmmSchedulerParams.indexTable = DMMPolicy_ApplicationPolicyTable.indexTable;
+  DMMSch_open(&dmmSchedulerParams);
+
+  /* register clients with DMM scheduler */
+  DMMSch_registerClient(pBleTaskHndl, DMMPolicy_StackRole_BlePeripheral);
+
+  DMMSch_registerClient(&(((pthread_Obj *) pMacTaskHndl)->task), DMMPolicy_StackRole_154Sensor);
+
+  /* set the stacks in default states */
+  DMMPolicy_updateApplicationState(DMMPolicy_StackRole_BlePeripheral, DMMPOLICY_BLE_IDLE);
+  DMMPolicy_updateApplicationState(DMMPolicy_StackRole_154Sensor, DMMPOLICY_154_UNINIT);
+
+#ifdef CUI_DISABLE
+    uartDebugInit();  // ← 이것만!
+#else
+    CUI_params_t cuiParams;
+    CUI_paramsInit(&cuiParams);
+    CUI_init(&cuiParams);
+#endif            
+
+  /* enable interrupts and start SYS/BIOS */
+  BIOS_start();
+
+  return 0;
 }
 
 /*!
@@ -230,190 +485,129 @@ void Main_assertHandler(uint8_t assertReason)
     /* Pull the plug and start over */
     SysCtrlSystemReset();
 #else
-    HwiP_disable();
+    Hwi_disable();
     while(1)
     {
         /* Put you code here to do something if in assert */
     }
 #endif
 }
-void *appTaskFxn(void *arg0);
-/*!
- * @brief       Main task function
+
+
+/*******************************************************************************
+ * @fn          AssertHandler
  *
- * @param       a0 -
- * @param       a1 -
+ * @brief       This is the Application's callback handler for asserts raised
+ *              in the stack.  When EXT_HAL_ASSERT is defined in the Stack
+ *              project this function will be called when an assert is raised,
+ *              and can be used to observe or trap a violation from expected
+ *              behavior.
+ *
+ *              As an example, for Heap allocation failures the Stack will raise
+ *              HAL_ASSERT_CAUSE_OUT_OF_MEMORY as the assertCause and
+ *              HAL_ASSERT_SUBCAUSE_NONE as the assertSubcause.  An application
+ *              developer could trap any malloc failure on the stack by calling
+ *              HAL_ASSERT_SPINLOCK under the matching case.
+ *
+ *              An application developer is encouraged to extend this function
+ *              for use by their own application.  To do this, add hal_assert.c
+ *              to your project workspace, the path to hal_assert.h (this can
+ *              be found on the stack side). Asserts are raised by including
+ *              hal_assert.h and using macro HAL_ASSERT(cause) to raise an
+ *              assert with argument assertCause.  the assertSubcause may be
+ *              optionally set by macro HAL_ASSERT_SET_SUBCAUSE(subCause) prior
+ *              to asserting the cause it describes. More information is
+ *              available in hal_assert.h.
+ *
+ * input parameters
+ *
+ * @param       assertCause    - Assert cause as defined in hal_assert.h.
+ * @param       assertSubcause - Optional assert subcause (see hal_assert.h).
+ *
+ * output parameters
+ *
+ * @param       None.
+ *
+ * @return      None.
  */
-void *appTaskFxn(void *arg0)
+void AssertHandler(uint8 assertCause, uint8 assertSubcause)
 {
-    /* The following code encapsulated in TI_154STACK_FPGA flag is used for
-     * internal FPGA evaluation of the 15.4 Stack and should not be used with
-     * TI hardware platforms. */
-#ifdef TI_154STACK_FPGA
-    /* FPGA build disables POWER constraints */
-    Power_setConstraint(PowerCC26XX_IDLE_PD_DISALLOW);
-    Power_setConstraint(PowerCC26XX_SB_DISALLOW);
+  // check the assert cause
+  switch (assertCause)
+  {
+    case HAL_ASSERT_CAUSE_OUT_OF_MEMORY:
+#ifndef CUI_DISABLE
+      CUI_assert("***ERROR*** >> OUT OF MEMORY!", false);
+#endif /* CUI_DISABLE */
+      break;
 
-    IOCPortConfigureSet(IOID_29, IOC_PORT_RFC_GPO0, IOC_IOMODE_NORMAL);
-    IOCPortConfigureSet(IOID_30, IOC_PORT_RFC_GPI0, IOC_INPUT_ENABLE);
-    IOCPortConfigureSet(IOID_15, IOC_PORT_RFC_TRC, IOC_IOMODE_NORMAL);
-    // configure RF Core SMI Command Link
-    IOCPortConfigureSet(IOID_22, IOC_IOCFG0_PORT_ID_RFC_SMI_CL_OUT, IOC_STD_OUTPUT);
-    IOCPortConfigureSet(IOID_21, IOC_IOCFG0_PORT_ID_RFC_SMI_CL_IN, IOC_STD_INPUT);
-#endif
+    case HAL_ASSERT_CAUSE_INTERNAL_ERROR:
+      // check the subcause
+#ifndef CUI_DISABLE
+      if (assertSubcause == HAL_ASSERT_SUBCAUSE_FW_INERNAL_ERROR)
+      {
+        CUI_assert("***ERROR*** >> INTERNAL FW ERROR!", false);
+      }
+      else
+      {
+        CUI_assert("***ERROR*** >> INTERNAL ERROR!", false);
+      }
+#endif /* CUI_DISABLE */
+      break;
 
-#ifndef OSAL_PORT2TIRTOS
-    /* Initialize ICall module */
-    ICall_init();
-#endif
-    /* Copy the extended address from the CCFG area */
-    CCFGRead_IEEE_MAC(ApiMac_extAddr);
+    case HAL_ASSERT_CAUSE_ICALL_ABORT:
+#ifndef CUI_DISABLE
+      CUI_assert("***ERROR*** >> ICALL ABORT!", true);
+#endif /* CUI_DISABLE */
+      break;
 
-    /* Check to see if the CCFG IEEE is valid */
-    if(memcmp(ApiMac_extAddr, dummyExtAddr, APIMAC_SADDR_EXT_LEN) == 0)
-    {
-        /* No, it isn't valid.  Get the Primary IEEE Address */
-        memcpy(ApiMac_extAddr, (uint8_t *)(FCFG1_BASE + EXTADDR_OFFSET),
-               (APIMAC_SADDR_EXT_LEN));
-    }
+    case HAL_ASSERT_CAUSE_ICALL_TIMEOUT:
+#ifndef CUI_DISABLE
+      CUI_assert("***ERROR*** >> ICALL TIMEOUT!", true);
+#endif /* CUI_DISABLE */
+      break;
 
-#ifdef NV_RESTORE
-    /* Setup the NV driver */
-    NVOCMP_loadApiPtrs(&Main_user1Cfg.nvFps);
+    case HAL_ASSERT_CAUSE_WRONG_API_CALL:
+#ifndef CUI_DISABLE
+      CUI_assert("***ERROR*** >> WRONG API CALL!", true);
+#endif /* CUI_DISABLE */
+      break;
 
-    if(Main_user1Cfg.nvFps.initNV)
-    {
-        Main_user1Cfg.nvFps.initNV( NULL);
-    }
-#endif
+  default:
+#ifndef CUI_DISABLE
+      CUI_assert("***ERROR*** >> DEFAULT SPINLOCK!", true);
+#endif /* CUI_DISABLE */
+      break;
+  }
 
-    /* Initialize the application */
-#ifdef OSAL_PORT2TIRTOS
-    Sensor_init(_macTaskId);
-#else
-    ICall_createRemoteTasks();
-
-    /* Initialize the application */
-    Sensor_init();
-#endif
-
-    /* Kick off application - Forever loop */
-    while(1)
-    {
-        Sensor_process();
-    }
+  return;
 }
 
-/*!
- * @brief       TIRTOS HWI Handler.  The name of this function is set to
- *              M3Hwi.excHandlerFunc in app.cfg, you can disable this by
- *              setting it to null.
- *
- * @param       excStack - uint32_t variable
- * @param       lr - uint32_t variable
- */
-void Main_excHandler(uint32_t *excStack, uint32_t lr)
-{
-    /* User defined function */
-    Main_assertHandler(MAIN_ASSERT_HWI_TIRTOS);
-}
-
-/*!
- * @brief       HAL assert handler required by OSAL memory module.
- */
 void assertHandler(void)
 {
-    /* User defined function */
-    Main_assertHandler(MAIN_ASSERT_MAC);
+    // Call the more detailed AssertHandler
+    AssertHandler(HAL_ASSERT_CAUSE_TRUE, 0x00);
 }
 
-
-/*!
- * @brief       "main()" function - starting point
+/*******************************************************************************
+ * @fn          smallErrorHook
+ *
+ * @brief       Error handler to be hooked into TI-RTOS.
+ *
+ * input parameters
+ *
+ * @param       eb - Pointer to Error Block.
+ *
+ * output parameters
+ *
+ * @param       None.
+ *
+ * @return      None.
  */
-int main(void)
+void smallErrorHook(Error_Block *eb)
 {
-    pthread_attr_t      attrs;
-    struct sched_param  priParam;
-    int                 retc;
-
-#ifndef USE_DEFAULT_USER_CFG
-    macUser0Cfg[0].pAssertFP = assertHandler;
-#endif
-
-    /*
-     Initialization for board related stuff such as LEDs
-     following TI-RTOS convention
-     */
-    Board_init();
-
-#if defined(FEATURE_BLE_OAD) && !defined(OAD_IMG_A)
-    /* If FEATURE_BLE_OAD is enabled, look for a left button
-     *  press on reset. This indicates to revert to some
-     *  factory image
-     */
-    if(!GPIO_read(CONFIG_GPIO_BTN1))
-    {
-        OAD_markSwitch();
-    }
-#endif /* FEATURE_BLE_OAD */
-
-#if (defined(FEATURE_BLE_OAD) || defined(FEATURE_NATIVE_OAD)) && !defined(OAD_ONCHIP)
-    SPI_init();
-#endif
-
-#if !defined(POWER_MEAS) && !defined(CUI_DISABLE)
-    /* Initialize CUI UART */
-    CUI_params_t cuiParams;
-    CUI_paramsInit(&cuiParams);
-
-    // One-time initialization of the CUI
-
-    // All later CUI_* functions will be ignored if this isn't called
-    CUI_init(&cuiParams);
-#endif
-
-#ifdef OSAL_PORT2TIRTOS
-    _macTaskId = macTaskInit(macUser0Cfg);
-#endif
-
-    /* Initialize the attributes structure with default values */
-    pthread_attr_init(&attrs);
-
-    /* Set priority, detach state, and stack size attributes */
-    priParam.sched_priority = APP_TASK_PRIORITY;
-    retc = pthread_attr_setschedparam(&attrs, &priParam);
-    retc |= pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-    retc |= pthread_attr_setstacksize(&attrs, APP_TASK_STACK_SIZE);
-    if (retc != 0) {
-        /* failed to set attributes */
-        while (1) {}
-    }
-
-    retc = pthread_create(&appThread, &attrs, appTaskFxn, NULL);
-    if (retc != 0) {
-        /* pthread_create() failed */
-        while (1) {}
-    }
-
-#ifdef USE_ITM_DBG
-    ITM_config itm_config =
-    {
-      48000000,
-      ITM_6000000
-    };
-    ITM_initModule(itm_config);
-    ITM_enableModule();
-#endif /* USE_ITM_DBG */
-
-#ifdef FREERTOS_SUPPORT
-    startRfCbThread();
-    /* Start the FreeRTOS scheduler */
-    vTaskStartScheduler();
-#else
-    BIOS_start(); /* enable interrupts and start SYS/BIOS */
-#endif
-
-    return (0);
+  for (;;);
 }
 
+/*******************************************************************************
+ */
