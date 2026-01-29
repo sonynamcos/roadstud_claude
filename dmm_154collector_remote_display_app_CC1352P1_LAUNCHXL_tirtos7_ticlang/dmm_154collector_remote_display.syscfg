@@ -1,0 +1,256 @@
+/**
+ * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
+ * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ * @cliArgs --device "CC1352P1F3RGZ" --part "Default" --package "RGZ" --rtos "tirtos7" --product "simplelink_cc13xx_cc26xx_sdk@8.31.00.11"
+ * @v2CliArgs --device "CC1352P" --package "VQFN (RGZ)" --rtos "tirtos7" --product "simplelink_cc13xx_cc26xx_sdk@8.31.00.11"
+ * @versions {"tool":"1.21.1+3772"}
+ */
+
+/**
+ * Import the modules used in this configuration.
+ */
+const ble          = scripting.addModule("/ti/ble5stack/ble");
+const CCFG         = scripting.addModule("/ti/devices/CCFG");
+const rfdesign     = scripting.addModule("/ti/devices/radioconfig/rfdesign");
+const dmm          = scripting.addModule("/ti/dmm/dmm");
+const AESCCM       = scripting.addModule("/ti/drivers/AESCCM");
+const AESCCM1      = AESCCM.addInstance();
+const AESCTRDRBG   = scripting.addModule("/ti/drivers/AESCTRDRBG");
+const AESCTRDRBG1  = AESCTRDRBG.addInstance();
+const AESECB       = scripting.addModule("/ti/drivers/AESECB");
+const AESECB1      = AESECB.addInstance();
+const ECDH         = scripting.addModule("/ti/drivers/ECDH");
+const ECDH1        = ECDH.addInstance();
+const NVS          = scripting.addModule("/ti/drivers/NVS");
+const NVS1         = NVS.addInstance();
+const NVS2         = NVS.addInstance();
+const Power        = scripting.addModule("/ti/drivers/Power");
+const RF           = scripting.addModule("/ti/drivers/RF");
+const SPI          = scripting.addModule("/ti/drivers/SPI", {}, false);
+const SPI1         = SPI.addInstance();
+const TRNG         = scripting.addModule("/ti/drivers/TRNG");
+const TRNG1        = TRNG.addInstance();
+const TRNG2        = TRNG.addInstance();
+const UART2        = scripting.addModule("/ti/drivers/UART2");
+const UART21       = UART2.addInstance();
+const Button       = scripting.addModule("/ti/drivers/apps/Button");
+const Button1      = Button.addInstance();
+const Button2      = Button.addInstance();
+const LED          = scripting.addModule("/ti/drivers/apps/LED");
+const LED1         = LED.addInstance();
+const LED2         = LED.addInstance();
+const Settings     = scripting.addModule("/ti/posix/tirtos/Settings");
+const BIOS         = scripting.addModule("/ti/sysbios/BIOS");
+const Boot         = scripting.addModule("/ti/sysbios/family/arm/cc26xx/Boot");
+const Hwi          = scripting.addModule("/ti/sysbios/family/arm/m3/Hwi");
+const GateMutex    = scripting.addModule("/ti/sysbios/gates/GateMutex");
+const GateMutexPri = scripting.addModule("/ti/sysbios/gates/GateMutexPri");
+const HeapCallback = scripting.addModule("/ti/sysbios/heaps/HeapCallback");
+const Clock        = scripting.addModule("/ti/sysbios/knl/Clock");
+const Event        = scripting.addModule("/ti/sysbios/knl/Event");
+const Idle         = scripting.addModule("/ti/sysbios/knl/Idle");
+const Idle2        = Idle.addInstance();
+const Semaphore    = scripting.addModule("/ti/sysbios/knl/Semaphore");
+const Swi          = scripting.addModule("/ti/sysbios/knl/Swi");
+const Task         = scripting.addModule("/ti/sysbios/knl/Task");
+const Error        = scripting.addModule("/ti/sysbios/runtime/Error");
+const Memory       = scripting.addModule("/ti/sysbios/runtime/Memory");
+const SysCallback  = scripting.addModule("/ti/sysbios/runtime/SysCallback");
+const System       = scripting.addModule("/ti/sysbios/runtime/System");
+const ti154stack   = scripting.addModule("/ti/ti154stack/ti154stack");
+
+/**
+ * Write custom configuration values to the imported modules.
+ */
+ble.deviceName                                            = "DMM 15.4 Collec RD";
+ble.addressMode                                           = "ADDRMODE_PUBLIC";
+ble.maxConnNum                                            = 1;
+ble.numOfAdvSets                                          = 1;
+ble.lockProject                                           = true;
+ble.oneLibSizeOpt                                         = false;
+ble.maxPDUSize                                            = 255;
+ble.numOfDefAdvSets                                       = 1;
+ble.radioConfig.codeExportConfig.$name                    = "ti_devices_radioconfig_code_export_param1";
+ble.connUpdateParamsPeripheral.$name                      = "ti_ble5stack_general_ble_conn_update_params0";
+ble.connUpdateParamsPeripheral.reqMinConnInt              = 100;
+ble.connUpdateParamsPeripheral.reqMaxConnInt              = 130;
+ble.advSet1.$name                                         = "ti_ble5stack_broadcaster_advertisement_set0";
+ble.advSet1.advParam1.$name                               = "ti_ble5stack_broadcaster_advertisement_params0";
+ble.advSet1.advData1.$name                                = "ti_ble5stack_broadcaster_advertisement_data0";
+ble.advSet1.advData1.GAP_ADTYPE_FLAGS                     = true;
+ble.advSet1.advData1.advertisingFlags                     = ["GAP_ADTYPE_FLAGS_BREDR_NOT_SUPPORTED","GAP_ADTYPE_FLAGS_GENERAL"];
+ble.advSet1.advData1.GAP_ADTYPE_16BIT_MORE                = true;
+ble.advSet1.advData1.numOfUUIDs16More                     = 1;
+ble.advSet1.advData1.UUID016More                          = 0x1190;
+ble.advSet1.scanRes1.$name                                = "ti_ble5stack_broadcaster_advertisement_data1";
+ble.advSet1.scanRes1.GAP_ADTYPE_LOCAL_NAME_COMPLETE       = true;
+ble.advSet1.scanRes1.GAP_ADTYPE_SLAVE_CONN_INTERVAL_RANGE = true;
+ble.advSet1.scanRes1.maxConnInterval                      = 130;
+ble.advSet1.scanRes1.GAP_ADTYPE_POWER_LEVEL               = true;
+
+CCFG.xoscCapArray             = true;
+CCFG.enableBootloader         = true;
+CCFG.enableBootloaderBackdoor = true;
+CCFG.dioBootloaderBackdoor    = 15;
+CCFG.levelBootloaderBackdoor  = "Active low";
+CCFG.srcClkLF                 = "LF RCOSC";
+CCFG.xoscCapArrayDelta        = 0xFA;
+CCFG.ccfgTemplate.$name       = "ti_devices_CCFG_CCFGCC26XXTemplate0";
+
+dmm.project                                        = "ti_dmm_154collector_remote_display";
+dmm.stackRoles                                     = ["blePeripheral","ti154Collector"];
+dmm.lockStackRoles                                 = true;
+dmm.projectStackConfiguration                      = ["ble","ti154stack"];
+dmm.numApplicationStates                           = 10;
+dmm.applicationState0                              = "ANY";
+dmm.applicationState1                              = "DMMPOLICY_BLE_IDLE";
+dmm.applicationState2                              = "DMMPOLICY_BLE_ADV";
+dmm.applicationState3                              = "DMMPOLICY_BLE_CONNECTING";
+dmm.applicationState4                              = "DMMPOLICY_BLE_HIGH_BANDWIDTH";
+dmm.applicationState5                              = "DMMPOLICY_BLE_CONNECTED";
+dmm.applicationState6                              = "DMMPOLICY_BLE_OAD";
+dmm.applicationState7                              = "DMMPOLICY_154_UNINIT";
+dmm.applicationState8                              = "DMMPOLICY_154_PROVISIONING";
+dmm.applicationState9                              = "DMMPOLICY_154_CONNECTED";
+dmm.policyArray.create(3);
+dmm.policyArray[0].$name                           = "ti_dmm_policy_dmm_policy1";
+dmm.policyArray[0].blePeripheral.$name             = "ti_dmm_policy_stack_dmm_stack_ble1";
+dmm.policyArray[0].blePeripheral.applicationStates = ["applicationState6"];
+dmm.policyArray[0].blePeripheral.weight            = 110;
+dmm.policyArray[0].blePeripheral.appliedActivity   = ["DMMPOLICY_APPLIED_ACTIVITY_BLE_CONNECTION"];
+dmm.policyArray[0].ti154Collector.$name            = "ti_dmm_policy_stack_dmm_stack_ti154stack1";
+dmm.policyArray[0].ti154Collector.weight           = 100;
+dmm.policyArray[1].$name                           = "ti_dmm_policy_dmm_policy2";
+dmm.policyArray[1].blePeripheral.$name             = "ti_dmm_policy_stack_dmm_stack_ble2";
+dmm.policyArray[1].blePeripheral.applicationStates = ["applicationState3","applicationState4"];
+dmm.policyArray[1].blePeripheral.weight            = 110;
+dmm.policyArray[1].blePeripheral.appliedActivity   = ["DMMPOLICY_APPLIED_ACTIVITY_BLE_CONNECTION"];
+dmm.policyArray[1].ti154Collector.$name            = "ti_dmm_policy_stack_dmm_stack_ti154stack2";
+dmm.policyArray[1].ti154Collector.weight           = 100;
+dmm.policyArray[2].$name                           = "ti_dmm_policy_dmm_policy3";
+dmm.policyArray[2].blePeripheral.$name             = "ti_dmm_policy_stack_dmm_stack_ble3";
+dmm.policyArray[2].ti154Collector.$name            = "ti_dmm_policy_stack_dmm_stack_ti154stack3";
+dmm.policyArray[2].ti154Collector.weight           = 1;
+
+AESCCM1.$name = "CONFIG_AESCCM0";
+
+AESCTRDRBG1.$name = "CONFIG_AESCTRDRBG_0";
+
+AESECB1.$name = "CONFIG_AESECB0";
+
+ECDH1.$name = "CONFIG_ECDH0";
+
+NVS1.$name                    = "CONFIG_NVSINTERNAL";
+NVS1.internalFlash.$name      = "ti_drivers_nvs_NVSCC26XX0";
+NVS1.internalFlash.regionBase = 0x52000;
+NVS1.internalFlash.regionSize = 0x4000;
+
+NVS2.nvsType                        = "External";
+NVS2.$name                          = "CONFIG_NVSEXTERNAL";
+NVS2.externalFlash.$name            = "ti_drivers_nvs_NVSSPI25X0";
+NVS2.externalFlash.regionSize       = 0x100000;
+NVS2.externalFlash.verifyBufferSize = 64;
+
+RF.globalCallbackFunction                   = "rfDriverCallback";
+RF.pinSelectionAntenna                      = 2;
+RF.rfAntennaPinSymbol0                      = "CONFIG_RF_SW_DIO5";
+RF.rfAntennaPinSymbol1                      = "CONFIG_RF_SW_DIO6";
+RF.rfAntennaPin0.$assign                    = "DIO_5";
+RF.rfAntennaPin1.$assign                    = "DIO_6";
+RF.rfAntennaPin0Instance.initialOutputState = scripting.forceWrite("Low");
+RF.rfAntennaPin1Instance.initialOutputState = scripting.forceWrite("Low");
+
+TRNG1.$name = "CONFIG_TRNG_0";
+
+TRNG2.$name = "CONFIG_TRNG_1";
+
+UART21.$name              = "CONFIG_DISPLAY_UART";
+UART21.uart.$assign       = "UART1";
+UART21.uart.txPin.$assign = "DIO_24";
+UART21.uart.rxPin.$assign = "DIO_25";
+
+Button1.$name          = "CONFIG_BTN_LEFT";
+Button1.button.$assign = "DIO_15";
+Button1.gpioPin.$name  = "CONFIG_GPIO_BTN1";
+Button1.gpioPin.pull   = "Pull Up";
+
+Button2.$name          = "CONFIG_BTN_RIGHT";
+Button2.button.$assign = "DIO_14";
+Button2.gpioPin.$name  = "CONFIG_GPIO_BTN2";
+Button2.gpioPin.pull   = "Pull Up";
+
+LED1.$name          = "CONFIG_LED_RED";
+LED1.ledPin.$assign = "DIO_11";
+LED1.gpioPin.$name  = "CONFIG_GPIO_RLED";
+
+LED2.$name          = "CONFIG_LED_GREEN";
+LED2.ledPin.$assign = "DIO_7";
+LED2.gpioPin.$name  = "CONFIG_GPIO_GLED";
+
+const NVSSPI25XDevice                        = scripting.addModule("/ti/drivers/nvs/NVSSPI25XDevice", {}, false);
+const NVSSPI25XDevice1                       = NVSSPI25XDevice.addInstance({}, false);
+NVSSPI25XDevice1.$name                       = "CONFIG_NVS_SPI_0";
+NVS2.externalFlash.spiFlashDevice            = NVSSPI25XDevice1;
+NVSSPI25XDevice1.chipSelect.$assign          = "DIO_20";
+NVSSPI25XDevice1.chipSelectPinInstance.$name = "CONFIG_GPIO_SPI_SS";
+
+SPI1.$name                         = "CONFIG_SPI_0";
+NVSSPI25XDevice1.sharedSpiInstance = SPI1;
+SPI1.spi.$assign                   = "SSI0";
+SPI1.spi.sclkPin.$assign           = "DIO_10";
+SPI1.spi.pociPin.$assign           = "DIO_8";
+SPI1.spi.picoPin.$assign           = "DIO_23";
+SPI1.spi.dmaRxChannel.$assign      = "DMA_CH3";
+SPI1.spi.dmaTxChannel.$assign      = "DMA_CH4";
+SPI1.sclkPinInstance.$name         = "CONFIG_PIN_SPI_SCLK";
+SPI1.pociPinInstance.$name         = "CONFIG_PIN_SPI_MISO";
+SPI1.picoPinInstance.$name         = "CONFIG_PIN_SPI_MOSI";
+
+BIOS.assertsEnabled = false;
+BIOS.rtsGateType    = "BIOS_GateMutexPri";
+BIOS.heapSize       = 0x00000000;
+BIOS.heapType       = "HeapCallback";
+
+Hwi.excHandlerFunc = "Main_excHandler";
+Hwi.nvicCCR        = [];
+
+HeapCallback.initFxn           = "osalHeapInitFxn";
+HeapCallback.allocInstFxn      = "osalHeapAllocFxn";
+HeapCallback.freeInstFxn       = "osalHeapFreeFxn";
+HeapCallback.getStatsInstFxn   = "osalHeapGetStatsFxn";
+HeapCallback.isBlockingInstFxn = "osalHeapIsBlockingFxn";
+
+Clock.tickPeriod  = 10;
+Clock.swiPriority = 4;
+
+const Timer       = scripting.addModule("/ti/sysbios/family/arm/cc26xx/Timer", {}, false);
+Timer.rtc.$assign = "RTC0";
+
+Idle2.$name   = "powerIdle";
+Idle2.idleFxn = "Power_idleFunc";
+
+Semaphore.supportsPriority = false;
+
+Swi.numPriorities = 6;
+
+Task.checkStackFlag    = false;
+Task.defaultStackSize  = 512;
+Task.idleTaskStackSize = 512;
+Task.numPriorities     = 6;
+
+Error.policy = "Error_SPIN";
+
+System.abortFxn          = "System_abortSpin";
+System.exitFxn           = "System_exitSpin";
+System.maxAtexitHandlers = 1;
+System.supportModule     = "SysCallback";
+
+ti154stack.lockProject                        = true;
+ti154stack.panID                              = 0x1;
+ti154stack.secureLevel                        = "macSecureDisabled";
+ti154stack.mode                               = "beacon";
+ti154stack.radioConfig.txPower                = "12";
+ti154stack.radioConfig.highPA                 = true;
+ti154stack.radioConfig.txPowerHi              = "14";
+ti154stack.radioConfig.codeExportConfig.$name = "ti_devices_radioconfig_code_export_param0";
+ti154stack.ti154stackModule.$name             = "ti_ti154stack_ti154stack_config_mod0";

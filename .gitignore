@@ -1,0 +1,35 @@
+# Build outputs
+Debug/
+Release/
+*.o
+*.obj
+*.d
+*.map
+*.out
+*.bin
+*.hex
+
+# IDE files
+.theia/
+*.theia-workspace
+.settings/
+.ccsproject
+.project
+
+# Generated files
+syscfg/
+ti_drivers_config.*
+ti_radio_config.*
+ti_154stack_config.*
+ti_ble_config.*
+ti_dmm_*_config.*
+
+# Temp files
+*.tmp
+*.bak
+*.log
+nul
+
+# Claude
+.claude/
+claude.md
