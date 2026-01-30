@@ -49,7 +49,6 @@
  */
 
 #include <xdc/runtime/Error.h>
-
 #include <ti/sysbios/knl/Clock.h>
 #include <ti/drivers/Power.h>
 #include <ti/drivers/power/PowerCC26XX.h>
@@ -58,20 +57,15 @@
 #include <ti/drivers/apps/LED.h>
 #include <ti/sysbios/hal/Hwi.h>
 #include <ti/drivers/GPIO.h>
-#include "application/uart_debug.h" 
-
 
 #include <icall.h>
 #include "bcomdef.h"
-
-#ifdef DMM_CENTRAL
-#include "central_display.h"
-#else
 #include "remote_display.h"
-#endif /* DMM_CENTRAL */
+#include "application/uart_debug.h" 
 
 #include "macTask.h"
-#include "sensor.h"
+#include "collector.h"
+
 /* Header files required to enable instruction fetch cache */
 #include <inc/hw_memmap.h>
 #include <driverlib/vims.h>
@@ -87,7 +81,6 @@
 #include "nvocmp.h"
 #endif
 
-
 #ifndef USE_DEFAULT_USER_CFG
 #include "ble_user_config.h"
 // BLE user defined configuration
@@ -99,18 +92,20 @@ icall_userCfg_t user0Cfg = BLE_USER_CFG;
 #endif
 
 #include "mac_user_config.h"
+#include <ti/display/Display.h>
 
 /* Include DMM module */
 #include <dmm/dmm_scheduler.h>
 #include "ti_dmm_application_policy.h"
-#include <dmm/dmm_priority_ble_154sensor.h>
+#include <dmm/dmm_priority_ble_154collector.h>
 
 /* Internal POSIX Mapping for thread handle */
 #include <tirtos/_pthread.h>
 
-#include "application/sk6812/sk6812_spi.h"
+#include "application/sk6812_spi.h"
 #include <ti/drivers/rf/RF.h>
-#include <ti/drivers/UART2.h>
+#include <ti/drivers/UART2.h>                                    
+#include <ti/log/Log.h>  
 
 #if defined(RESET_ASSERT)
 #include <driverlib/sys_ctrl.h>
@@ -126,41 +121,40 @@ icall_userCfg_t user0Cfg = BLE_USER_CFG;
 #include "ioc.h"
 #endif
 
+
 // extern volatile uint32_t g_antCbEvents;
 // extern volatile uint32_t g_antCbCount;
 
 static uint8_t ant_shown = 0;
 
-static void AntCb_ShowOnce(void)
-{
-    // if (ant_shown) return;
-    // if (g_antCbCount == 0) return;   // 콜백이 아직 한번도 안옴
+// static void AntCb_ShowOnce(void)
+// {
+//     if (ant_shown) return;
+//     if (g_antCbCount == 0) return;   // 콜백이 아직 한번도 안옴
 
-    // ant_shown = 1;
+//     ant_shown = 1;
 
-    // if (g_antCbEvents & (uint32_t)RF_GlobalEventRadioSetup)
-    // {
-    //     // 초록: RadioSetup까지 들어옴
-    //     sk6812_flash_once(0, 40, 0, 150);
-    // }
-    // else if (g_antCbEvents & (uint32_t)RF_GlobalEventInit)
-    // {
-    //     // 파랑: Init만 들어옴
-    //     sk6812_flash_once(0, 0, 40, 150);
-    // }
-    // else
-    // {
-    //     // 빨강: 기타 이벤트만
-    //     sk6812_flash_once(40, 0, 0, 150);
-    // }
-}
+//     if (g_antCbEvents & (uint32_t)RF_GlobalEventRadioSetup)
+//     {
+//         // 초록: RadioSetup까지 들어옴
+//         sk6812_flash_once(0, 40, 0, 150);
+//     }
+//     else if (g_antCbEvents & (uint32_t)RF_GlobalEventInit)
+//     {
+//         // 파랑: Init만 들어옴
+//         sk6812_flash_once(0, 0, 40, 150);
+//     }
+//     else
+//     {
+//         // 빨강: 기타 이벤트만
+//         sk6812_flash_once(40, 0, 0, 150);
+//     }
+// }
 
 /*******************************************************************************
  * MACROS
  */
-#if defined(FEATURE_NATIVE_OAD)
-#error "Secure commissioning and Native OAD are not currently supported for DMM."
-#endif
+
 /*******************************************************************************
  * CONSTANTS
  */
@@ -168,18 +162,18 @@ static void AntCb_ShowOnce(void)
 #define EXTADDR_OFFSET 0x2F0
 
 #define MAC_APP_TASK_PRIORITY   1
-#if defined(CC13X2R1_LAUNCHXL)  ||      \
-    defined(CC26X2R1_LAUNCHXL)  ||      \
-    defined(CC13X2P1_LAUNCHXL)  ||      \
-    defined(CC13X2P_2_LAUNCHXL) ||      \
-    defined(CC13X2P_4_LAUNCHXL) ||      \
-    defined(CC2652RB_LAUNCHXL)  ||      \
-    defined(EM_CC1354P10_1_LP)  ||      \
-    defined(EM_CC1354P10_6_LP)  ||      \
+#if defined(CC13X2R1_LAUNCHXL)   || \
+    defined(CC26X2R1_LAUNCHXL)   || \
+    defined(CC13X2P1_LAUNCHXL)   || \
+    defined(CC13X2P_2_LAUNCHXL ) || \
+    defined(CC13X2P_4_LAUNCHXL)  || \
+    defined(CC2652RB_LAUNCHXL)   || \
+    defined(EM_CC1354P10_1_LP)   || \
+    defined(EM_CC1354P10_6_LP)   || \
     defined(DeviceFamily_CC26X4)
 #define MAC_APP_TASK_STACK_SIZE 2048
 #else
-#define MAC_APP_TASK_STACK_SIZE 900
+#define MAC_APP_TASK_STACK_SIZE 1024
 #endif
 
 #define MAIN_ASSERT_HWI_TIRTOS   4
@@ -277,15 +271,18 @@ Void macAppTaskFxn(UArg a0, UArg a1)
 #endif
 
 #endif
-
+  
+    // SK6812 초기화 (task context에서)
+    SK6812_init();
+    
     /* Initialize the application */
-    Sensor_init(_macTaskId);
+    Collector_init(_macTaskId);
 
     /* Kick off application - Forever loop */
     while(1)
     {
         // AntCb_ShowOnce();
-        Sensor_process();
+        Collector_process();
     }
 }
 
@@ -340,13 +337,6 @@ int main()
   GPIO_init();
   Board_initGeneral();
 
-  /*
-   * Boot Rainbow - MUST be called BEFORE BIOS_start()
-   * GPT Checklist: RF/BLE not started yet, so LED won't interfere
-   * 30 frames @ 20ms = ~600ms rainbow, then complete shutdown
-   */
-  BootRainbow_RunOnce(30);
-
 #ifdef DMM_OAD
     /* If DMM_OAD is enabled, look for a left button
      *  press on reset. This indicates to revert to some
@@ -374,23 +364,46 @@ int main()
   user0Cfg.appServiceInfo->timerTickPeriod = Clock_tickPeriod;
   user0Cfg.appServiceInfo->timerMaxMillisecond  = ICall_getMaxMSecs();
 
-  Button_init();
+#ifdef BLE_START
+  /* Initialize ICall module */
+  ICall_init();
 
+  /* Start tasks of external images */
+  ICall_createRemoteTasks();
+  pBleTaskHndl = ICall_getRemoteTaskHandle(0);
+
+  RemoteDisplay_createTask();
+#endif
+
+#ifdef MAC_START
+  /* Initialize 15.4 sensor tasks */
+  _macTaskId = macTaskInit(macUser0Cfg);
+  pMacTaskHndl = macTaskGetTaskHndl();
+
+  /* create 15.4 app task */
+  Task_Params_init(&macAppTaskParams);
+  macAppTaskParams.stack = macAppTaskStack;
+  macAppTaskParams.stackSize = MAC_APP_TASK_STACK_SIZE;
+  macAppTaskParams.priority = MAC_APP_TASK_PRIORITY;
+  Task_construct(&macAppTask, macAppTaskFxn, &macAppTaskParams, NULL);
+#endif
+
+  Button_init();
 #ifndef POWER_MEAS
   LED_init();
-  /* Initialize UI for key and LED */
+
 #ifndef CUI_DISABLE
+  /* Initialize UI for key and LED */
   CUI_params_t cuiParams;
   CUI_paramsInit(&cuiParams);
-#ifdef USE_ITM_DBG
+#if defined(USE_ITM_DBG) || defined(MT_CSF)
     cuiParams.manageUart = false;
 #endif
 
-  // One-time initialization of the CUI
-  // CUI_init(&cuiParams);
+    // One-time initialization of the CUI
+    CUI_init(&cuiParams);
 #endif /* CUI_DISABLE */
 #endif
-
 
 #ifdef USE_ITM_DBG
   // Configure SWO Traces on pin 26
@@ -404,41 +417,13 @@ int main()
   ITM_enableModule();
 #endif /* USE_ITM_DBG */
 
-#ifdef BLE_START
-  /* Initialize ICall module */
-  ICall_init();
-
-  /* Start tasks of external images */
-  ICall_createRemoteTasks();
-  pBleTaskHndl = ICall_getRemoteTaskHandle(0);
-
-#ifdef DMM_CENTRAL
-  CentralDisplay_createTask();
-#else
-  RemoteDisplay_createTask();
-#endif /* DMM_CENTRAL */
-#endif
-
-#ifdef MAC_START
-  /* Initialize 15.4 sensor tasks */
-  _macTaskId = macTaskInit(macUser0Cfg);
-  pMacTaskHndl = macTaskGetTaskHndl();
-
-  /* create 15.4 Sensor app task
-   */
-  Task_Params_init(&macAppTaskParams);
-  macAppTaskParams.stack = macAppTaskStack;
-  macAppTaskParams.stackSize = MAC_APP_TASK_STACK_SIZE;
-  macAppTaskParams.priority = MAC_APP_TASK_PRIORITY;
-  Task_construct(&macAppTask, macAppTaskFxn, &macAppTaskParams, NULL);
-#endif
 
   /* initialize and open the DMM policy manager */
   DMMPolicy_init();
   DMMPolicy_Params_init(&dmmPolicyParams);
   dmmPolicyParams.numPolicyTableEntries = DMMPolicy_ApplicationPolicySize;
   dmmPolicyParams.policyTable = DMMPolicy_ApplicationPolicyTable;
-  dmmPolicyParams.globalPriorityTable = globalPriorityTable_bleL154SensorH;
+  dmmPolicyParams.globalPriorityTable = globalPriorityTable_bleL154CollectorH;
   DMMPolicy_open(&dmmPolicyParams);
 
   /* initialize and open the DMM scheduler */
@@ -452,20 +437,21 @@ int main()
 
   /* register clients with DMM scheduler */
   DMMSch_registerClient(pBleTaskHndl, DMMPolicy_StackRole_BlePeripheral);
-
-  DMMSch_registerClient(&(((pthread_Obj *) pMacTaskHndl)->task), DMMPolicy_StackRole_154Sensor);
+  DMMSch_registerClient(&(((pthread_Obj *) pMacTaskHndl)->task), DMMPolicy_StackRole_154Collector);
 
   /* set the stacks in default states */
   DMMPolicy_updateApplicationState(DMMPolicy_StackRole_BlePeripheral, DMMPOLICY_BLE_IDLE);
-  DMMPolicy_updateApplicationState(DMMPolicy_StackRole_154Sensor, DMMPOLICY_154_UNINIT);
+  DMMPolicy_updateApplicationState(DMMPolicy_StackRole_154Collector, DMMPOLICY_154_UNINIT);
 
+   
 #ifdef CUI_DISABLE
     uartDebugInit();  // ← 이것만!
 #else
     CUI_params_t cuiParams;
     CUI_paramsInit(&cuiParams);
     CUI_init(&cuiParams);
-#endif            
+#endif                                               
+
 
   /* enable interrupts and start SYS/BIOS */
   BIOS_start();
@@ -496,7 +482,6 @@ void Main_assertHandler(uint8_t assertReason)
     }
 #endif
 }
-
 
 /*******************************************************************************
  * @fn          AssertHandler
@@ -546,15 +531,15 @@ void AssertHandler(uint8 assertCause, uint8 assertSubcause)
       break;
 
     case HAL_ASSERT_CAUSE_INTERNAL_ERROR:
-      // check the subcause
 #ifndef CUI_DISABLE
+      // check the subcause
       if (assertSubcause == HAL_ASSERT_SUBCAUSE_FW_INERNAL_ERROR)
       {
-        CUI_assert("***ERROR*** >> INTERNAL FW ERROR!", false);
+          CUI_assert("***ERROR*** >> INTERNAL FW ERROR!", false);
       }
       else
       {
-        CUI_assert("***ERROR*** >> INTERNAL ERROR!", false);
+          CUI_assert("***ERROR*** >> INTERNAL ERROR!", false);
       }
 #endif /* CUI_DISABLE */
       break;
